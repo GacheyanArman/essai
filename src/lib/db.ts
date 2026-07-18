@@ -54,7 +54,15 @@ function nullableNum(value: unknown) { return value == null ? null : Number(valu
 function text(value: unknown) { return value == null ? "" : String(value); }
 
 function mapAdmin(row: Row): AdminUser {
-  return { id: text(row.id), email: text(row.email), name: text(row.name), passwordHash: text(row.password_hash), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
+  return {
+    id: text(row.id),
+    email: text(row.email),
+    name: text(row.name),
+    passwordHash: text(row.password_hash),
+    sessionVersion: num(row.session_version) || 1,
+    createdAt: date(row.created_at),
+    updatedAt: date(row.updated_at),
+  };
 }
 function mapCategory(row: Row): Category {
   return { id: text(row.id), name: text(row.name), slug: text(row.slug), description: text(row.description), image: text(row.image), sortOrder: num(row.sort_order), isActive: bool(row.is_active), createdAt: date(row.created_at), updatedAt: date(row.updated_at) };
@@ -176,19 +184,111 @@ const settingsDefaults: Omit<SiteSettings, "updatedAt"> = {
 export const db: any = {
   adminUser: {
     async findUnique({ where }: any) {
-      const key = where.email ? "email" : "id"; const result = await execute(`SELECT * FROM admin_users WHERE ${key} = ? LIMIT 1`, [where[key]]); return result.rows[0] ? mapAdmin(result.rows[0]) : null;
+      const key = where.email ? "email" : "id";
+      const result = await execute(`SELECT * FROM admin_users WHERE ${key} = ? LIMIT 1`, [where[key]]);
+      return result.rows[0] ? mapAdmin(result.rows[0]) : null;
     },
     async upsert({ where, update, create }: any) {
       const existing = await this.findUnique({ where });
       const stamp = now();
       if (existing) {
         const data = { ...existing, ...update, updatedAt: new Date(stamp) };
-        await execute("UPDATE admin_users SET email=?, name=?, password_hash=?, updated_at=? WHERE id=?", [data.email, data.name, data.passwordHash, stamp, existing.id]);
+        await execute(
+          "UPDATE admin_users SET email=?, name=?, password_hash=?, session_version=?, updated_at=? WHERE id=?",
+          [data.email, data.name, data.passwordHash, data.sessionVersion, stamp, existing.id],
+        );
         return { ...data };
       }
-      const record: AdminUser = { id: create.id ?? id(), email: create.email, name: create.name, passwordHash: create.passwordHash, createdAt: new Date(stamp), updatedAt: new Date(stamp) };
-      await execute("INSERT INTO admin_users (id,email,name,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?)", [record.id, record.email, record.name, record.passwordHash, stamp, stamp]);
+      const record: AdminUser = {
+        id: create.id ?? id(),
+        email: create.email,
+        name: create.name,
+        passwordHash: create.passwordHash,
+        sessionVersion: create.sessionVersion ?? 1,
+        createdAt: new Date(stamp),
+        updatedAt: new Date(stamp),
+      };
+      await execute(
+        "INSERT INTO admin_users (id,email,name,password_hash,session_version,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        [record.id, record.email, record.name, record.passwordHash, record.sessionVersion, stamp, stamp],
+      );
       return record;
+    },
+    async incrementSessionVersion({ where }: any) {
+      const result = await execute(
+        "UPDATE admin_users SET session_version=session_version+1, updated_at=? WHERE id=? RETURNING *",
+        [now(), where.id],
+      );
+      return result.rows[0] ? mapAdmin(result.rows[0]) : null;
+    },
+  },
+  authLoginAttempt: {
+    async findUnique({ where }: any) {
+      const result = await execute("SELECT * FROM auth_login_attempts WHERE key_hash=? LIMIT 1", [where.keyHash]);
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        keyHash: text(row.key_hash),
+        failedAttempts: num(row.failed_attempts),
+        windowStartedAt: date(row.window_started_at),
+        blockedUntil: row.blocked_until == null ? null : date(row.blocked_until),
+        updatedAt: date(row.updated_at),
+      };
+    },
+    async upsert({ where, update, create }: any) {
+      const record = { ...create, ...update, keyHash: where.keyHash, updatedAt: update.updatedAt ?? create.updatedAt ?? new Date() };
+      await execute(
+        `INSERT INTO auth_login_attempts (key_hash,failed_attempts,window_started_at,blocked_until,updated_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT (key_hash) DO UPDATE SET failed_attempts=EXCLUDED.failed_attempts, window_started_at=EXCLUDED.window_started_at, blocked_until=EXCLUDED.blocked_until, updated_at=EXCLUDED.updated_at`,
+        [record.keyHash, record.failedAttempts, record.windowStartedAt.toISOString(), record.blockedUntil?.toISOString() ?? null, record.updatedAt.toISOString()],
+      );
+      return record;
+    },
+    async recordFailure({ keyHash, now: currentTime, windowStartedBefore, blockedUntil, maxFailures }: any) {
+      const nowIso = currentTime.toISOString();
+      const cutoffIso = windowStartedBefore.toISOString();
+      const blockIso = blockedUntil.toISOString();
+      const resetCondition = `(auth_login_attempts.window_started_at <= ? OR (auth_login_attempts.blocked_until IS NOT NULL AND auth_login_attempts.blocked_until <= ?))`;
+      const nextAttempts = `(CASE WHEN ${resetCondition} THEN 1 ELSE auth_login_attempts.failed_attempts + 1 END)`;
+      const result = await execute(
+        `INSERT INTO auth_login_attempts (key_hash,failed_attempts,window_started_at,blocked_until,updated_at)
+         VALUES (?,1,?,NULL,?)
+         ON CONFLICT (key_hash) DO UPDATE SET
+           failed_attempts=${nextAttempts},
+           window_started_at=CASE WHEN ${resetCondition} THEN ? ELSE auth_login_attempts.window_started_at END,
+           blocked_until=CASE
+             WHEN auth_login_attempts.blocked_until IS NOT NULL AND auth_login_attempts.blocked_until > ? THEN auth_login_attempts.blocked_until
+             WHEN ${nextAttempts} >= ? THEN ?
+             ELSE NULL
+           END,
+           updated_at=?
+         RETURNING *`,
+        [
+          keyHash, nowIso, nowIso,
+          cutoffIso, nowIso,
+          cutoffIso, nowIso, nowIso,
+          nowIso,
+          cutoffIso, nowIso, maxFailures, blockIso,
+          nowIso,
+        ],
+      );
+      const row = result.rows[0];
+      return {
+        keyHash: text(row.key_hash),
+        failedAttempts: num(row.failed_attempts),
+        windowStartedAt: date(row.window_started_at),
+        blockedUntil: row.blocked_until == null ? null : date(row.blocked_until),
+        updatedAt: date(row.updated_at),
+      };
+    },
+    async deleteMany({ where }: any) {
+      const keys: string[] = where.keyHash?.in ?? [];
+      for (const key of keys) await execute("DELETE FROM auth_login_attempts WHERE key_hash=?", [key]);
+      return { count: keys.length };
+    },
+    async deleteExpired({ before }: any) {
+      await execute("DELETE FROM auth_login_attempts WHERE updated_at < ?", [before.toISOString()]);
     },
   },
   category: {

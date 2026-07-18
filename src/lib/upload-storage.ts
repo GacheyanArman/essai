@@ -68,6 +68,33 @@ function requireBlobStorage() {
   }
 }
 
+function detectedImageContentType(buffer: Buffer) {
+  if (
+    buffer.length >= 3
+    && buffer[0] === 0xff
+    && buffer[1] === 0xd8
+    && buffer[2] === 0xff
+  ) return "image/jpeg";
+
+  if (
+    buffer.length >= 8
+    && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) return "image/png";
+
+  if (
+    buffer.length >= 12
+    && buffer.toString("ascii", 0, 4) === "RIFF"
+    && buffer.toString("ascii", 8, 12) === "WEBP"
+  ) return "image/webp";
+
+  if (buffer.length >= 16 && buffer.toString("ascii", 4, 8) === "ftyp") {
+    const brands = buffer.toString("ascii", 8, Math.min(buffer.length, 32));
+    if (/avif|avis/.test(brands)) return "image/avif";
+  }
+
+  return null;
+}
+
 export function contentTypeForUpload(filename: string) {
   const extension = path.extname(filename).slice(1).toLowerCase();
   return contentTypeByExtension.get(extension) ?? "application/octet-stream";
@@ -86,6 +113,11 @@ export async function saveImages(files: File[]) {
     if (file.size > MAX_IMAGE_SIZE) throw new Error("Один файл не должен превышать 10 МБ");
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const detectedType = detectedImageContentType(buffer);
+    if (!detectedType || detectedType !== file.type) {
+      throw new Error("Содержимое файла не соответствует заявленному формату изображения");
+    }
+
     const hash = createHash("sha256").update(buffer).digest("hex");
     const filename = `${hash}.${extension}`;
     const blobPath = `${BLOB_UPLOAD_PREFIX}${filename}`;

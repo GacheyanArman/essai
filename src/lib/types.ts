@@ -3,6 +3,7 @@ export interface AdminUser {
   email: string;
   name: string;
   passwordHash: string;
+  sessionVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }

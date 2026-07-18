@@ -4,6 +4,8 @@ import { Footer } from "@/components/store/footer";
 import { getSettings } from "@/lib/data";
 import { getSiteUrl } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export default async function StoreLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSettings();
   const organization = {
@@ -15,5 +17,5 @@ export default async function StoreLayout({ children }: { children: React.ReactN
     sameAs: [`https://t.me/${settings.channelUsername.replace(/^@/, "")}`],
     contactPoint: { "@type": "ContactPoint", contactType: "customer service", url: `https://t.me/${settings.telegramUsername.replace(/^@/, "")}` },
   };
-  return <><Header announcement={settings.announcement} telegramUsername={settings.telegramUsername} /><main>{children}</main><Footer telegramUsername={settings.telegramUsername} channelUsername={settings.channelUsername} footerText={settings.footerText} /><Script id="organization-schema" type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organization) }} /></>;
+  return <><Header announcement={settings.announcement} telegramUsername={settings.telegramUsername} /><main>{children}</main><Footer telegramUsername={settings.telegramUsername} channelUsername={settings.channelUsername} footerText={settings.footerText} /><Script id="organization-schema" type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organization).replace(/</g, "\\u003c") }} /></>;
 }

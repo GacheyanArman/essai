@@ -42,3 +42,11 @@ yarn-error.log*
 next-env.d.ts
 
 .env
+
+# local databases and credential-bearing exports
+/data/*.db
+/data/*.sqlite*
+/database/*export*.json
+/database/*.dump
+/database/*.sql.gz
+/DEPLOYMENT_SECRETS*

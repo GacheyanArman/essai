@@ -6,9 +6,23 @@ CREATE TABLE IF NOT EXISTS admin_users (
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  session_version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE admin_users DROP COLUMN IF EXISTS last_totp_counter;
+
+CREATE TABLE IF NOT EXISTS auth_login_attempts (
+  key_hash TEXT PRIMARY KEY,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  window_started_at TEXT NOT NULL,
+  blocked_until TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_updated ON auth_login_attempts(updated_at);
 
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,

@@ -11,8 +11,9 @@
     "setup": "node scripts/setup.mjs",
     "db:seed": "tsx database/seed.ts",
     "uploads:migrate": "node scripts/migrate-uploads.mjs",
-    "db:import-sqlite": "tsx database/import-sqlite.ts",
-    "db:wipe": "tsx scripts/wipe-data.ts"
+    "db:wipe": "tsx scripts/wipe-data.ts",
+    "security:generate": "node scripts/generate-security-secrets.mjs",
+    "admin:rotate": "tsx scripts/rotate-admin-credentials.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -38,5 +39,10 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "next": {
+      "postcss": "8.5.14"
+    }
+  }
 }

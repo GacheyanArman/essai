@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { BarChart3, Boxes, LayoutDashboard, LogOut, Package, ShoppingBag, Tags } from "lucide-react";
+import { BarChart3, Boxes, LayoutDashboard, LogOut, Package, ShieldX, ShoppingBag, Tags } from "lucide-react";
 import { Logo } from "@/components/store/logo";
-import { logoutAction } from "@/app/admin/actions";
+import { logoutAction, revokeAllSessionsAction } from "@/app/admin/actions";
 
 const nav = [
   { href: "/admin/dashboard", label: "Обзор", icon: LayoutDashboard },
@@ -40,7 +40,18 @@ export function AdminShell({ children, userName }: { children: React.ReactNode; 
             <ShoppingBag className="h-4 w-4" /> Перейти в магазин
           </Link>
           <div className="mb-4 text-xs text-white/50"><p className="text-white">{userName}</p><p className="mt-1">Administrator</p></div>
-          <form action={logoutAction}><button className="flex w-full items-center gap-3 rounded-xl border border-white/15 px-4 py-3 text-xs text-white/65 transition hover:bg-white hover:text-black"><LogOut className="h-4 w-4" /> Выйти</button></form>
+          <div className="space-y-2">
+            <form action={revokeAllSessionsAction}>
+              <button className="flex w-full items-center gap-3 rounded-xl border border-amber-300/25 px-4 py-3 text-left text-xs text-amber-100/75 transition hover:bg-amber-100 hover:text-black">
+                <ShieldX className="h-4 w-4" /> Завершить все сеансы
+              </button>
+            </form>
+            <form action={logoutAction}>
+              <button className="flex w-full items-center gap-3 rounded-xl border border-white/15 px-4 py-3 text-xs text-white/65 transition hover:bg-white hover:text-black">
+                <LogOut className="h-4 w-4" /> Выйти
+              </button>
+            </form>
+          </div>
         </div>
       </aside>
       <div className="admin-grid min-w-0"><main className="mx-auto max-w-[1500px] p-5 sm:p-8 lg:p-10">{children}</main></div>

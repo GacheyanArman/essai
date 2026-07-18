@@ -2,8 +2,18 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { authenticate, createSession, destroySession, requireAdmin } from "@/lib/auth";
+import {
+  authenticate,
+  checkLoginRateLimit,
+  clearLoginFailures,
+  createSession,
+  destroySession,
+  recordLoginFailure,
+  requireAdmin,
+  revokeAllAdminSessions,
+} from "@/lib/auth";
 import { db } from "@/lib/store-db";
 import type { ProductImage } from "@/lib/types";
 import {
@@ -69,18 +79,62 @@ async function removeUploadIfUnused(url: string) {
   await removeStoredUpload(url);
 }
 
+function clientIpAddress(headersList: Awaited<ReturnType<typeof headers>>) {
+  const forwardedFor = headersList.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return (
+    headersList.get("cf-connecting-ip")
+    || forwardedFor
+    || headersList.get("x-real-ip")
+    || "unknown"
+  );
+}
+
 export async function loginAction(formData: FormData) {
   const email = "admin@esexpress.local";
   const password = str(formData, "password");
-  const user = await authenticate(email, password);
-  if (!user) redirect("/admin/login?error=1");
-  await createSession({ sub: user.id, email: user.email, name: user.name });
+  const ipAddress = clientIpAddress(await headers());
+
+  let rateLimit;
+  try {
+    rateLimit = await checkLoginRateLimit(ipAddress, email);
+  } catch (error) {
+    console.error("Admin login security configuration is invalid", error);
+    redirect("/admin/login?error=config");
+  }
+  if (!rateLimit.allowed) {
+    redirect(`/admin/login?error=locked&retry=${rateLimit.retryAfterSeconds}`);
+  }
+
+  let user;
+  try {
+    user = await authenticate(email, password);
+  } catch (error) {
+    console.error("Admin login security configuration is invalid", error);
+    redirect("/admin/login?error=config");
+  }
+
+  if (!user) {
+    const failureResult = await recordLoginFailure(ipAddress, email);
+    if (!failureResult.allowed) {
+      redirect(`/admin/login?error=locked&retry=${failureResult.retryAfterSeconds}`);
+    }
+    redirect("/admin/login?error=invalid");
+  }
+
+  await clearLoginFailures(ipAddress, email);
+  await createSession(user);
   redirect("/admin/dashboard");
 }
 
 export async function logoutAction() {
   await destroySession();
   redirect("/admin/login");
+}
+
+export async function revokeAllSessionsAction() {
+  const session = await requireAdmin();
+  await revokeAllAdminSessions(session.sub);
+  redirect("/admin/login?revoked=1");
 }
 
 async function uniqueProductSlug(base: string, currentId?: string) {
