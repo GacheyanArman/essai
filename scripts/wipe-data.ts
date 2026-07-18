@@ -1,22 +1,13 @@
-import { db, initializeDatabase } from "../src/lib/db";
+import "dotenv/config";
 
-async function main() {
-  await initializeDatabase();
-  console.log("Wiping dummy data...");
-  
-  // We'll delete all rows from these tables.
-  const tables = ["product_images", "products", "brands", "categories", "banners", "reviews"];
-  
-  for (const table of tables) {
-    try {
-      await db.$transaction(async (tx: any) => {
-        // execute is not exposed directly on tx in a standard way here, let's just use the client.
-        // Wait, db in our custom wrapper doesn't have a raw query method exposed easily except if we use execute inside db.ts.
-      });
-    } catch (e) {
-      // ignore
-    }
-  }
+import { neon } from "@neondatabase/serverless";
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL is not set.");
+if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
+  throw new Error("DATABASE_URL must point to Neon PostgreSQL.");
 }
 
-main();
+const sql = neon(databaseUrl);
+await sql.query("TRUNCATE TABLE product_images, products, brands, categories, banners, reviews CASCADE");
+console.log("Catalog, banners, and reviews were removed. Admin user and site settings were kept.");

@@ -1,87 +1,92 @@
 # EsExpress Premium Store
 
-Интернет-магазин на Next.js 16, TypeScript, Tailwind CSS 4 и embedded LibSQL/SQLite. Заказ оформляется через Telegram. В проект входит защищённая админ-панель для управления товарами, категориями, брендами, баннерами, отзывами, главной страницей и SEO.
+Интернет-магазин на Next.js 16, TypeScript и Tailwind CSS 4. База данных работает на **Neon PostgreSQL** через официальный пакет `@neondatabase/serverless`. Turso, LibSQL и локальная SQLite-база приложению больше не нужны.
 
-## Быстрый запуск
+## Подключение Neon Console
+
+1. Создайте проект в Neon Console.
+2. Нажмите **Connect** и скопируйте **pooled connection string**.
+3. Установите зависимости и создайте файл окружения:
 
 ```bash
 npm install
+cp .env.example .env
+```
+
+4. Вставьте строку Neon в `.env`:
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST-pooler.REGION.aws.neon.tech/DBNAME?sslmode=require&channel_binding=require"
+SESSION_SECRET="длинная-случайная-строка"
+ADMIN_PASSWORD="новый-пароль-администратора"
+NEXT_PUBLIC_SITE_URL="http://localhost:3000"
+```
+
+5. Создайте таблицы и администратора, затем запустите проект:
+
+```bash
 npm run setup
 npm run dev
 ```
 
-Откройте `http://localhost:3000`.
-
+Сайт: `http://localhost:3000`  
 Админ-панель: `http://localhost:3000/admin/login`
 
-Стартовые данные для входа находятся в `.env` после выполнения `npm run setup`:
+Схема PostgreSQL создаётся автоматически при первом подключении. `npm run setup` также создаёт или обновляет администратора с паролем из `ADMIN_PASSWORD`. Для ручного запуска через Neon Console → SQL Editor добавлен файл `database/neon-schema.sql`.
 
-- Email: `admin@esexpress.local`
-- Пароль: `EsExpress2026!`
+## Перенос данных из старой SQLite-базы
 
-Перед публикацией обязательно замените `SESSION_SECRET`, `ADMIN_EMAIL` и `ADMIN_PASSWORD`.
+В архив включён экспорт старой базы `data/esexpress.db` в файл `database/sqlite-export.json`. В нём сохранены:
 
-## Исправленная загрузка изображений
+- 5 категорий;
+- 8 брендов;
+- 13 товаров;
+- 18 изображений товаров;
+- баннер, отзывы, настройки сайта и администратор.
 
-Загружаемые изображения больше не записываются в `public` во время работы dev-сервера. Они хранятся в `data/uploads` и выдаются через маршрут `/uploads/[filename]`. Поэтому сохранение товара не заставляет Turbopack пересобирать проект после каждого файла и не должно зависать на бесконечной компиляции.
+Для переноса используйте **пустую Neon branch/database**:
 
-Для товаров загрузка фотографии отделена от сохранения текстовых данных:
+```bash
+npm run db:import-sqlite
+npm run db:seed
+```
 
-1. Браузер загружает выбранные фотографии через `/api/admin/uploads`.
-2. После успешной загрузки выполняется Server Action сохранения товара.
-3. На загрузку установлен тайм-аут 30 секунд, кнопка блокируется на время запроса, повторный параллельный запрос не запускается.
+Первая команда создаёт PostgreSQL-таблицы и импортирует старые данные. Вторая задаёт администратору пароль из текущего `.env`.
 
-Файлы именуются по SHA-256 содержимого. Одинаковая фотография, даже отправленная несколько раз под разными именами, физически сохраняется только один раз. В пределах одного товара одинаковые URL также удаляются из списка повторов.
+## Загрузка изображений
 
-### Миграция старых загрузок
-
-Для проекта, где уже есть файлы в `public/uploads`, выполните:
+Изображения хранятся в `data/uploads` и выдаются маршрутом `/uploads/[filename]`. Файлы именуются по SHA-256, поэтому одинаковые изображения не сохраняются повторно.
 
 ```bash
 npm run uploads:migrate
 ```
 
-Команда:
+Команда переносит старые файлы из `public/uploads`, устраняет дубликаты и обновляет ссылки уже в Neon PostgreSQL.
 
-- перенесёт изображения в `data/uploads`;
-- объединит полностью одинаковые файлы;
-- обновит ссылки в SQLite для товаров, категорий, брендов и баннеров;
-- удалит старые копии из `public/uploads`.
+> Для Vercel с несколькими инстансами рекомендуется перенести изображения в Vercel Blob, S3, Cloudflare R2 или Cloudinary. Neon хранит данные PostgreSQL, но не является файловым хранилищем.
 
-`npm run setup` запускает эту миграцию автоматически перед заполнением базы.
-
-## Что реализовано
-
-- Полностью адаптивная витрина.
-- Каталог с поиском и фильтрами по категориям, брендам и меткам.
-- Карточка товара с галереей и Product JSON-LD.
-- Заказ через Telegram с автоматически сформированным сообщением.
-- Админ-аутентификация через защищённую HTTP-only cookie.
-- CRUD товаров, категорий, брендов, баннеров и отзывов.
-- Мультизагрузка JPEG, PNG, WebP и AVIF до 10 МБ на файл.
-- Защита от повторного сохранения одинаковых изображений.
-- Управление текстами главной страницы и SEO.
-- Sitemap, robots.txt, Open Graph, Twitter Card и Organization JSON-LD.
-- Embedded LibSQL/SQLite для локального запуска без внешней базы данных.
-
-## Данные и production
-
-Локально база хранится в `data/esexpress.db`, изображения — в `data/uploads`.
-
-Для production с несколькими инстансами рекомендуется:
-
-1. Подключить управляемую LibSQL/Turso или PostgreSQL.
-2. Перенести изображения в S3, R2 или Cloudinary.
-3. Указать публичный адрес в `NEXT_PUBLIC_SITE_URL`.
-4. Настроить резервное копирование базы и изображений.
-
-## Команды
+## Основные команды
 
 ```bash
-npm run dev              # разработка
-npm run build            # production-сборка
-npm run start            # запуск production-сборки
-npm run typecheck        # проверка TypeScript
-npm run lint             # ESLint
-npm run uploads:migrate  # перенос и дедупликация старых загрузок
+npm run dev                # локальная разработка
+npm run build              # production-сборка
+npm run start              # запуск production-сборки
+npm run typecheck          # проверка TypeScript
+npm run lint               # ESLint
+npm run setup              # схема Neon + администратор + миграция загрузок
+npm run db:seed            # создать/обновить администратора и настройки
+npm run db:import-sqlite   # импорт включённого экспорта SQLite в Neon
+npm run db:wipe            # удалить каталог, баннеры и отзывы
+npm run uploads:migrate    # перенести старые изображения
 ```
+
+## Деплой на Vercel
+
+Добавьте в Environment Variables:
+
+- `DATABASE_URL` — pooled connection string из Neon Console;
+- `SESSION_SECRET`;
+- `ADMIN_PASSWORD`;
+- `NEXT_PUBLIC_SITE_URL` — публичный адрес сайта.
+
+Для preview и production можно использовать отдельные Neon branches.

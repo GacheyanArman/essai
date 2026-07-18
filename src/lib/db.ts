@@ -1,109 +1,48 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-import { createClient, type Client, type InValue, type Row } from "@libsql/client";
+import { neon } from "@neondatabase/serverless";
+import { schemaStatements } from "@/lib/schema";
 import type { AdminUser, Banner, Brand, Category, Product, ProductImage, Review, SiteSettings } from "@/lib/types";
 
-const isVercel = process.env.VERCEL === "1";
-const configuredDatabaseUrl = process.env.TURSO_DATABASE_URL
-  ?? process.env.DATABASE_URL
-  ?? (isVercel ? undefined : "file:./data/esexpress.db");
+type Row = Record<string, unknown>;
 
-if (!configuredDatabaseUrl) {
-  throw new Error("Set TURSO_DATABASE_URL before deploying to Vercel. A local SQLite file cannot be used there.");
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error(
+    "DATABASE_URL is not set. Copy the PostgreSQL connection string from Neon Console → Connect and add it to .env.",
+  );
 }
 
-if (isVercel && configuredDatabaseUrl.startsWith("file:")) {
-  throw new Error("DATABASE_URL points to a local SQLite file. Use TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel.");
+if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
+  throw new Error("DATABASE_URL must be a PostgreSQL connection string from Neon, not a Turso/libSQL or file: URL.");
 }
 
-const databaseUrl: string = configuredDatabaseUrl;
-
-if (databaseUrl.startsWith("file:")) {
-  mkdirSync(path.join(process.cwd(), "data"), { recursive: true });
-}
-
+const sql = neon(databaseUrl, { fullResults: true });
 const globalDb = globalThis as unknown as { esexpressInit?: Promise<void> };
-function createDbClient(): Client {
-  const authToken = process.env.TURSO_AUTH_TOKEN || process.env.authToken;
-  return createClient({ url: databaseUrl, ...(authToken ? { authToken } : {}) });
-}
 
-const schemaStatements = [
-  `PRAGMA foreign_keys = ON`,
-  `CREATE TABLE IF NOT EXISTS admin_users (
-    id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS categories (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS brands (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', logo TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS products (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, sku TEXT NOT NULL UNIQUE,
-    short_description TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', price INTEGER NOT NULL,
-    compare_at_price INTEGER, currency TEXT NOT NULL DEFAULT 'RUB', stock INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'published', is_new INTEGER NOT NULL DEFAULT 0, is_featured INTEGER NOT NULL DEFAULT 0,
-    is_bestseller INTEGER NOT NULL DEFAULT 0, is_on_sale INTEGER NOT NULL DEFAULT 0,
-    seo_title TEXT NOT NULL DEFAULT '', seo_description TEXT NOT NULL DEFAULT '', category_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-    FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE RESTRICT,
-    FOREIGN KEY(brand_id) REFERENCES brands(id) ON DELETE RESTRICT
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_products_status ON products(status, created_at)`,
-  `CREATE TABLE IF NOT EXISTS product_images (
-    id TEXT PRIMARY KEY, url TEXT NOT NULL, alt TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0,
-    product_id TEXT NOT NULL, FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_product_images ON product_images(product_id, sort_order)`,
-  `CREATE TABLE IF NOT EXISTS banners (
-    id TEXT PRIMARY KEY, eyebrow TEXT NOT NULL DEFAULT '', title TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', image TEXT NOT NULL,
-    cta_label TEXT NOT NULL DEFAULT 'Смотреть коллекцию', cta_href TEXT NOT NULL DEFAULT '/catalog', theme TEXT NOT NULL DEFAULT 'dark',
-    position INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS reviews (
-    id TEXT PRIMARY KEY, author TEXT NOT NULL, city TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL DEFAULT 5, text TEXT NOT NULL,
-    is_approved INTEGER NOT NULL DEFAULT 0, product_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-    FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_reviews_approved ON reviews(is_approved, created_at)`,
-  `CREATE TABLE IF NOT EXISTS site_settings (
-    id TEXT PRIMARY KEY, store_name TEXT NOT NULL, tagline TEXT NOT NULL, announcement TEXT NOT NULL,
-    telegram_username TEXT NOT NULL, channel_username TEXT NOT NULL, hero_eyebrow TEXT NOT NULL, hero_title TEXT NOT NULL,
-    hero_text TEXT NOT NULL, founder_title TEXT NOT NULL, founder_text TEXT NOT NULL, seo_title TEXT NOT NULL,
-    seo_description TEXT NOT NULL, footer_text TEXT NOT NULL, updated_at TEXT NOT NULL
-  )`,
-];
+function toPostgresPlaceholders(query: string) {
+  let index = 0;
+  return query.replace(/\?/g, () => `$${++index}`);
+}
 
 async function ensureReady() {
   if (!globalDb.esexpressInit) {
     globalDb.esexpressInit = (async () => {
-      const initClient = createDbClient();
-      try {
-        await initClient.batch(schemaStatements.map((sql) => ({ sql, args: [] })), "write");
-      } finally {
-        initClient.close();
+      for (const statement of schemaStatements) {
+        await sql.query(statement, [], { fullResults: true });
       }
-    })();
+    })().catch((error) => {
+      globalDb.esexpressInit = undefined;
+      throw error;
+    });
   }
   await globalDb.esexpressInit;
 }
 
-async function execute(sql: string, args: InValue[] = []) {
+async function execute(query: string, args: any[] = []) {
   await ensureReady();
-  const queryClient = createDbClient();
-  try {
-    return await queryClient.execute({ sql, args });
-  } finally {
-    queryClient.close();
-  }
+  return sql.query(toPostgresPlaceholders(query), args, { fullResults: true });
 }
 
 function id() { return randomUUID().replaceAll("-", ""); }
@@ -330,7 +269,32 @@ export const db: any = {
     async delete({where}:any){await execute("DELETE FROM reviews WHERE id=?",[where.id]);},
   },
   siteSettings: {
-    async upsert({where,update,create}:any){const result=await execute("SELECT * FROM site_settings WHERE id=? LIMIT 1",[where.id]);if(result.rows[0]){const existing=mapSettings(result.rows[0]);if(!Object.keys(update).length)return existing;const record={...existing,...update,updatedAt:new Date()};await execute("UPDATE site_settings SET store_name=?,tagline=?,announcement=?,telegram_username=?,channel_username=?,hero_eyebrow=?,hero_title=?,hero_text=?,founder_title=?,founder_text=?,seo_title=?,seo_description=?,footer_text=?,updated_at=? WHERE id=?",[record.storeName,record.tagline,record.announcement,record.telegramUsername,record.channelUsername,record.heroEyebrow,record.heroTitle,record.heroText,record.founderTitle,record.founderText,record.seoTitle,record.seoDescription,record.footerText,record.updatedAt.toISOString(),record.id]);return record;}const stamp=now();const record={...settingsDefaults,...create,id:create.id??where.id??"main",updatedAt:new Date(stamp)};await execute("INSERT INTO site_settings (id,store_name,tagline,announcement,telegram_username,channel_username,hero_eyebrow,hero_title,hero_text,founder_title,founder_text,seo_title,seo_description,footer_text,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[record.id,record.storeName,record.tagline,record.announcement,record.telegramUsername,record.channelUsername,record.heroEyebrow,record.heroTitle,record.heroText,record.founderTitle,record.founderText,record.seoTitle,record.seoDescription,record.footerText,stamp]);return record;},
+    async upsert({ where, update, create }: any) {
+      const result = await execute("SELECT * FROM site_settings WHERE id=? LIMIT 1", [where.id]);
+      if (result.rows[0]) {
+        const existing = mapSettings(result.rows[0]);
+        if (!Object.keys(update).length) return existing;
+        const record = { ...existing, ...update, updatedAt: new Date() };
+        await execute("UPDATE site_settings SET store_name=?,tagline=?,announcement=?,telegram_username=?,channel_username=?,hero_eyebrow=?,hero_title=?,hero_text=?,founder_title=?,founder_text=?,seo_title=?,seo_description=?,footer_text=?,updated_at=? WHERE id=?", [record.storeName, record.tagline, record.announcement, record.telegramUsername, record.channelUsername, record.heroEyebrow, record.heroTitle, record.heroText, record.founderTitle, record.founderText, record.seoTitle, record.seoDescription, record.footerText, record.updatedAt.toISOString(), record.id]);
+        return record;
+      }
+
+      const stamp = now();
+      const record = { ...settingsDefaults, ...create, id: create.id ?? where.id ?? "main", updatedAt: new Date(stamp) };
+      const fields: Record<string, string> = {
+        storeName: "store_name", tagline: "tagline", announcement: "announcement", telegramUsername: "telegram_username", channelUsername: "channel_username", heroEyebrow: "hero_eyebrow", heroTitle: "hero_title", heroText: "hero_text", founderTitle: "founder_title", founderText: "founder_text", seoTitle: "seo_title", seoDescription: "seo_description", footerText: "footer_text",
+      };
+      const conflictFields = Object.keys(update).filter((field) => field in fields);
+      const onConflict = conflictFields.length
+        ? `DO UPDATE SET ${[...conflictFields.map((field) => `${fields[field]}=EXCLUDED.${fields[field]}`), "updated_at=EXCLUDED.updated_at"].join(", ")}`
+        : "DO UPDATE SET id=site_settings.id";
+
+      const persisted = await execute(
+        `INSERT INTO site_settings (id,store_name,tagline,announcement,telegram_username,channel_username,hero_eyebrow,hero_title,hero_text,founder_title,founder_text,seo_title,seo_description,footer_text,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) ${onConflict} RETURNING *`,
+        [record.id, record.storeName, record.tagline, record.announcement, record.telegramUsername, record.channelUsername, record.heroEyebrow, record.heroTitle, record.heroText, record.founderTitle, record.founderText, record.seoTitle, record.seoDescription, record.footerText, stamp],
+      );
+      return mapSettings(persisted.rows[0]);
+    },
   },
   async $transaction(callback:any){return callback(db);},
   async $disconnect(){ /* clients are closed after each query */ },

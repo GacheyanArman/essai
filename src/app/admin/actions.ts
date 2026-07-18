@@ -70,7 +70,7 @@ async function removeUploadIfUnused(url: string) {
 }
 
 export async function loginAction(formData: FormData) {
-  const email = (process.env.ADMIN_EMAIL ?? "admin@esexpress.local").toLowerCase();
+  const email = "admin@esexpress.local";
   const password = str(formData, "password");
   const user = await authenticate(email, password);
   if (!user) redirect("/admin/login?error=1");
@@ -118,14 +118,13 @@ async function uniqueBrandSlug(base: string, currentId?: string) {
 export async function createProduct(formData: FormData) {
   await requireAdmin();
 
-  let productId = "";
   try {
     const name = str(formData, "name");
     if (!name) throw new Error("Название обязательно");
 
     const uploaded = await productImageUrls(formData);
     const slug = await uniqueProductSlug(slugify(str(formData, "slug") || name));
-    const product = await db.product.create({
+    await db.product.create({
       data: {
         name,
         slug,
@@ -149,7 +148,6 @@ export async function createProduct(formData: FormData) {
         },
       },
     });
-    productId = product.id;
   } catch (error) {
     console.error("createProduct failed", error);
     throw new Error(errorMessage(error));

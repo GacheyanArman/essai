@@ -4,12 +4,11 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createClient } from "@libsql/client";
+import { neon } from "@neondatabase/serverless";
 
 const root = process.cwd();
 const sourceDirectory = path.join(root, "public", "uploads");
 const destinationDirectory = path.join(root, "data", "uploads");
-const databaseUrl = process.env.DATABASE_URL ?? "file:./data/esexpress.db";
 const supportedExtensions = new Set(["jpg", "jpeg", "png", "webp", "avif"]);
 
 await mkdir(destinationDirectory, { recursive: true });
@@ -47,20 +46,21 @@ for (const entry of files) {
   replacements.set(`/uploads/${entry.name}`, `/uploads/${destinationName}`);
 }
 
-if (replacements.size && existsSync(path.join(root, "data", "esexpress.db"))) {
-  const client = createClient({ url: databaseUrl });
-  try {
-    for (const [oldUrl, newUrl] of replacements) {
-      await client.batch([
-        { sql: "UPDATE product_images SET url = ? WHERE url = ?", args: [newUrl, oldUrl] },
-        { sql: "UPDATE categories SET image = ? WHERE image = ?", args: [newUrl, oldUrl] },
-        { sql: "UPDATE brands SET logo = ? WHERE logo = ?", args: [newUrl, oldUrl] },
-        { sql: "UPDATE banners SET image = ? WHERE image = ?", args: [newUrl, oldUrl] },
-      ], "write");
-    }
-  } finally {
-    client.close();
+const databaseUrl = process.env.DATABASE_URL;
+if (replacements.size && databaseUrl) {
+  if (!databaseUrl.startsWith("postgresql://") && !databaseUrl.startsWith("postgres://")) {
+    throw new Error("DATABASE_URL must be a PostgreSQL connection string from Neon.");
   }
+
+  const sql = neon(databaseUrl);
+  for (const [oldUrl, newUrl] of replacements) {
+    await sql.query("UPDATE product_images SET url = $1 WHERE url = $2", [newUrl, oldUrl]);
+    await sql.query("UPDATE categories SET image = $1 WHERE image = $2", [newUrl, oldUrl]);
+    await sql.query("UPDATE brands SET logo = $1 WHERE logo = $2", [newUrl, oldUrl]);
+    await sql.query("UPDATE banners SET image = $1 WHERE image = $2", [newUrl, oldUrl]);
+  }
+} else if (replacements.size) {
+  console.warn("DATABASE_URL is not set; files were moved, but database URLs were not updated.");
 }
 
 for (const entry of files) {

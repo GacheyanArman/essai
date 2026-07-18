@@ -1,17 +1,26 @@
-import { existsSync, copyFileSync, mkdirSync } from "node:fs";
+import "dotenv/config";
+
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 const root = process.cwd();
-if (!existsSync(join(root, ".env"))) {
-  copyFileSync(join(root, ".env.example"), join(root, ".env"));
+const envPath = join(root, ".env");
+
+if (!existsSync(envPath)) {
+  copyFileSync(join(root, ".env.example"), envPath);
   console.log("Created .env from .env.example");
+  console.log("Add your Neon DATABASE_URL to .env, then run npm run setup again.");
+  process.exit(0);
+}
+
+const envContents = readFileSync(envPath, "utf8");
+if (!/DATABASE_URL\s*=\s*["']?postgres(?:ql)?:\/\//.test(envContents) || envContents.includes("USER:PASSWORD@HOST")) {
+  console.error("Set a real Neon PostgreSQL DATABASE_URL in .env before running setup.");
+  process.exit(1);
 }
 
 mkdirSync(join(root, "data", "uploads"), { recursive: true });
-
-const migration = spawnSync(process.execPath, ["scripts/migrate-uploads.mjs"], { stdio: "inherit" });
-if (migration.status !== 0) process.exit(migration.status ?? 1);
 
 const seed = spawnSync("npx", ["tsx", "database/seed.ts"], {
   stdio: "inherit",
@@ -19,5 +28,8 @@ const seed = spawnSync("npx", ["tsx", "database/seed.ts"], {
 });
 if (seed.status !== 0) process.exit(seed.status ?? 1);
 
+const migration = spawnSync(process.execPath, ["scripts/migrate-uploads.mjs"], { stdio: "inherit" });
+if (migration.status !== 0) process.exit(migration.status ?? 1);
+
 console.log("\nEsExpress is ready. Run: npm run dev");
-console.log("Admin: /admin/login (credentials are in .env)");
+console.log("Admin: /admin/login (password is configured in .env)");
