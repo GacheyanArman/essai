@@ -5,7 +5,21 @@ import path from "node:path";
 import { createClient, type Client, type InValue, type Row } from "@libsql/client";
 import type { AdminUser, Banner, Brand, Category, Product, ProductImage, Review, SiteSettings } from "@/lib/types";
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:./data/esexpress.db";
+const isVercel = process.env.VERCEL === "1";
+const configuredDatabaseUrl = process.env.TURSO_DATABASE_URL
+  ?? process.env.DATABASE_URL
+  ?? (isVercel ? undefined : "file:./data/esexpress.db");
+
+if (!configuredDatabaseUrl) {
+  throw new Error("Set TURSO_DATABASE_URL before deploying to Vercel. A local SQLite file cannot be used there.");
+}
+
+if (isVercel && configuredDatabaseUrl.startsWith("file:")) {
+  throw new Error("DATABASE_URL points to a local SQLite file. Use TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel.");
+}
+
+const databaseUrl: string = configuredDatabaseUrl;
+
 if (databaseUrl.startsWith("file:")) {
   mkdirSync(path.join(process.cwd(), "data"), { recursive: true });
 }
