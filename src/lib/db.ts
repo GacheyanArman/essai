@@ -12,7 +12,8 @@ if (databaseUrl.startsWith("file:")) {
 
 const globalDb = globalThis as unknown as { esexpressInit?: Promise<void> };
 function createDbClient(): Client {
-  return createClient({ url: databaseUrl });
+  const authToken = process.env.TURSO_AUTH_TOKEN || process.env.authToken;
+  return createClient({ url: databaseUrl, ...(authToken ? { authToken } : {}) });
 }
 
 const schemaStatements = [
@@ -145,6 +146,8 @@ function matchesProductCondition(condition: Record<string, any>, product: Produc
       else if (product.id !== expected) return false;
       continue;
     }
+    if (key === "slug" && product.slug !== expected) return false;
+    if (key === "sku" && product.sku !== expected) return false;
     if (key === "name" && !matchesText(product.name, expected)) return false;
     if (key === "description" && !matchesText(product.description, expected)) return false;
     if (key === "shortDescription" && !matchesText(product.shortDescription, expected)) return false;

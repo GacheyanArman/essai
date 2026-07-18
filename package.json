@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "setup": "node scripts/setup.mjs",
-    "db:seed": "tsx database/seed.ts"
+    "db:seed": "tsx database/seed.ts",
+    "uploads:migrate": "node scripts/migrate-uploads.mjs"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

@@ -25,8 +25,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
           <Logo className="h-20" />
           <div className="mt-10 flex h-12 w-12 items-center justify-center rounded-full bg-black text-white"><LockKeyhole className="h-5 w-5" /></div>
           <h2 className="mt-6 font-display text-5xl tracking-[-0.05em]">Вход</h2>
-          <p className="mt-3 text-sm leading-6 text-black/50">Панель управления товарами, контентом и SEO.</p>
-          {params.error ? <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">Неверный email или пароль.</div> : null}
+          {params.error ? <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">Неверный пароль.</div> : null}
           <form action={loginAction} className="mt-7 space-y-4">
             <label className="block"><span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.18em] text-black/45">Пароль</span><Input type="password" name="password" required autoComplete="current-password" /></label>
             <Button type="submit" className="mt-2 w-full">Войти в панель</Button>
