@@ -253,26 +253,47 @@ export async function deleteProduct(formData: FormData) {
 
 export async function createCategory(formData: FormData) {
   await requireAdmin();
-  const name = str(formData, "name");
-  const [uploaded] = await saveImages(imageFiles(formData, "imageFile"));
-  await db.category.create({ data: { name, slug: await uniqueCategorySlug(slugify(str(formData, "slug") || name)), description: str(formData, "description"), image: uploaded || str(formData, "image"), sortOrder: int(formData, "sortOrder"), isActive: bool(formData, "isActive") } });
+  try {
+    const name = str(formData, "name");
+    if (!name) throw new Error("Название обязательно");
+    const [uploaded] = await saveImages(imageFiles(formData, "imageFile"));
+    await db.category.create({ data: { name, slug: await uniqueCategorySlug(slugify(str(formData, "slug") || name)), description: str(formData, "description"), image: uploaded || str(formData, "image"), sortOrder: int(formData, "sortOrder"), isActive: bool(formData, "isActive") } });
+  } catch (error) {
+    console.error("createCategory failed", error);
+    redirect(`/admin/categories?error=${encodeURIComponent(errorMessage(error))}`);
+  }
   revalidatePath("/");
   redirect("/admin/categories?saved=1");
 }
 
 export async function updateCategory(formData: FormData) {
   await requireAdmin();
-  const id = str(formData, "id");
-  const name = str(formData, "name");
-  const [uploaded] = await saveImages(imageFiles(formData, "imageFile"));
-  await db.category.update({ where: { id }, data: { name, slug: await uniqueCategorySlug(slugify(str(formData, "slug") || name), id), description: str(formData, "description"), image: uploaded || str(formData, "image"), sortOrder: int(formData, "sortOrder"), isActive: bool(formData, "isActive") } });
+  try {
+    const id = str(formData, "id");
+    const name = str(formData, "name");
+    if (!name) throw new Error("Название обязательно");
+    const [uploaded] = await saveImages(imageFiles(formData, "imageFile"));
+    await db.category.update({ where: { id }, data: { name, slug: await uniqueCategorySlug(slugify(str(formData, "slug") || name), id), description: str(formData, "description"), image: uploaded || str(formData, "image"), sortOrder: int(formData, "sortOrder"), isActive: bool(formData, "isActive") } });
+  } catch (error) {
+    console.error("updateCategory failed", error);
+    redirect(`/admin/categories?error=${encodeURIComponent(errorMessage(error))}`);
+  }
   revalidatePath("/");
   redirect("/admin/categories?saved=1");
 }
 
 export async function deleteCategory(formData: FormData) {
   await requireAdmin();
-  await db.category.delete({ where: { id: str(formData, "id") } });
+  try {
+    await db.category.delete({ where: { id: str(formData, "id") } });
+  } catch (error) {
+    console.error("deleteCategory failed", error);
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "";
+    const message = code === "23503"
+      ? "Нельзя удалить категорию: в ней ещё есть товары. Сначала перенесите эти товары в другую категорию или удалите их."
+      : errorMessage(error);
+    redirect(`/admin/categories?error=${encodeURIComponent(message)}`);
+  }
   revalidatePath("/");
   redirect("/admin/categories?deleted=1");
 }

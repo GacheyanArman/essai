@@ -74,12 +74,13 @@ export function contentTypeForUpload(filename: string) {
 }
 
 export async function saveImages(files: File[]) {
+  const realFiles = files.filter((file) => file && file.size > 0);
+  if (!realFiles.length) return [];
+
   requireBlobStorage();
   const savedUrls = new Set<string>();
 
-  for (const file of files) {
-    if (!file || file.size === 0) continue;
-
+  for (const file of realFiles) {
     const extension = extensionByContentType.get(file.type);
     if (!extension) throw new Error(`Формат ${file.type || file.name} не поддерживается`);
     if (file.size > MAX_IMAGE_SIZE) throw new Error("Один файл не должен превышать 10 МБ");
